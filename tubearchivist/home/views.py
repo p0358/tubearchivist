@@ -12,7 +12,7 @@ from api.src.search_processor import SearchProcess
 from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.forms import AuthenticationForm
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.views import View
 from home.src.download.yt_dlp_base import CookieHandler
@@ -1134,9 +1134,28 @@ def progress(request):
     """resolves to /progress/
     return list of messages for frontend
     """
-    all_messages = RedisArchivist().get_progress()
-    json_data = {"messages": all_messages}
-    return JsonResponse(json_data)
+    if request.GET.get("stream", False):
+        # TODO: use proper pub/sub callbacks instead of this
+        # hint: https://redis.io/docs/manual/keyspace-notifications/
+        # https://medium.com/@imamramadhanns/working-with-redis-keyspace-notifications-x-python-c5c6847368a
+        # - we probably want to use keyspace events, and thus `Kg$d` config (to catch JSON and string key types operations)
+        # - keyspace notifications need to be enabled, at runtime should be doable with CONFIG SET
+        # - we probably need some common place where it'd SUBSCRIBE to all possible keys in the main TA app, and then
+        # the generator progress_event_stream() should somehow add itself as one of the callbacks and later remove
+        # (but how do we know if the request was terminated BY CLIENT mid-way to do that?)
+        # TODO: read request.GET.get("types") to listen just to specified types of interest
+        def progress_event_stream():
+            all_messages = RedisArchivist().get_progress()
+            yield json.dumps({"messages": all_messages})
+            while len(all_messages):
+                sleep(0.5)
+                all_messages = RedisArchivist().get_progress()
+                yield json.dumps({"messages": all_messages})
+        return StreamingHttpResponse(progress_event_stream(), content_type="text/event-stream")
+    else:
+        all_messages = RedisArchivist().get_progress()
+        json_data = {"messages": all_messages}
+        return JsonResponse(json_data)
 
 
 def process(request):

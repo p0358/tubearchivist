@@ -27,24 +27,32 @@ function checkMessages() {
 
 // get messages for page on timer
 function getMessages(dataOrigin) {
-  fetch('/progress/')
-    .then(response => response.json())
-    .then(responseData => {
-      const messages = buildMessage(responseData, dataOrigin);
-      if (messages.length > 0) {
-        // restart itself
-        setTimeout(() => getMessages(dataOrigin), 500);
+  if (typeof EventSource !== "undefined") {
+    const source = new EventSource('/progress/?stream=1&types=' + messageTypes[dataOrigin].join(','));
+    source.onmessage = function(event) {
+      const responseData = JSON.parse(event.data);
+      if (buildMessage(responseData, dataOrigin).length === 0) {
+        source.close();
       }
-    });
+    };
+  } else {
+    fetch('/progress/')
+      .then(response => response.json())
+      .then(responseData => {
+        const messages = buildMessage(responseData, dataOrigin);
+        if (messages.length > 0) {
+          // restart itself
+          setTimeout(() => getMessages(dataOrigin), 500);
+        }
+      });
+  }
 }
 
 // make div for all messages, return relevant
 function buildMessage(responseData, dataOrigin) {
-  // filter relevan messages
+  // filter relevant messages
   let allMessages = responseData['messages'];
-  let messages = allMessages.filter(function (value) {
-    return messageTypes[dataOrigin].includes(value['status']);
-  }, dataOrigin);
+  let messages = allMessages.filter(msg => messageTypes[dataOrigin].includes(msg['status']));
   // build divs
   let notificationDiv = document.getElementById('notifications');
   let nots = notificationDiv.childElementCount;
